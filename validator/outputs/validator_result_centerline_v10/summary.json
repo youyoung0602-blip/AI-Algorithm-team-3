@@ -1,0 +1,133 @@
+{
+  "schema_version": "4.0",
+  "validator_version": "1.0.1",
+  "status": "PASS",
+  "input": {
+    "directory": "C:\\Users\\yenni\\Downloads\\AI-Algorithm-team-3\\validator\\waam_sb3_baseline\\validator_job_01",
+    "trajectory_rows": 12712,
+    "target_watertight": true
+  },
+  "schedule": {
+    "makespan_s": 1097.39019535,
+    "robot_completion_s": {
+      "1": 1097.39019535,
+      "2": 1097.39019535,
+      "3": 1097.39019535
+    },
+    "workload_imbalance_s": 0.0,
+    "normalized_imbalance": 0.0
+  },
+  "reach": {
+    "distance_basis": "XY",
+    "passed": true,
+    "robots": [
+      {
+        "robot_id": 1,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1475.003320153476,
+        "minimum_xy_margin_mm": 24.996679846524103,
+        "xy_utilization_ratio": 0.9833355467689839,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      },
+      {
+        "robot_id": 2,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1403.8019482038046,
+        "minimum_xy_margin_mm": 96.19805179619539,
+        "xy_utilization_ratio": 0.935867965469203,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      },
+      {
+        "robot_id": 3,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1475.076892315059,
+        "minimum_xy_margin_mm": 24.923107684940987,
+        "xy_utilization_ratio": 0.983384594876706,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      }
+    ]
+  },
+  "collision": {
+    "passed": true,
+    "collision_event_count": 0,
+    "arm_envelope": {
+      "enabled": true,
+      "passed": true,
+      "event_count": 0,
+      "minimum_safety_margin_mm": 4.363468726052673,
+      "centerline_distance_at_worst_mm": 254.36346872605267,
+      "required_distance_at_worst_mm": 250.0,
+      "capsule_surface_clearance_at_worst_mm": 54.36346872605267,
+      "pair": [
+        1,
+        2
+      ],
+      "time_s": 92.3148598701695,
+      "closest_points_xy_mm": [
+        [
+          -104.69913482666016,
+          -76.4344482421875
+        ],
+        [
+          115.89041900634766,
+          50.218711853027344
+        ]
+      ],
+      "tcp_positions_xy_mm": [
+        [
+          -104.69913482666016,
+          -76.4344482421875
+        ],
+        [
+          115.89041900634766,
+          50.218711853027344
+        ],
+        [
+          500.0,
+          -866.025390625
+        ]
+      ]
+    },
+    "tcp_radius": {
+      "enabled": true,
+      "passed": true,
+      "event_count": 0,
+      "minimum_distance_mm": 254.36346872605267,
+      "required_distance_at_minimum_mm": 200.0,
+      "pair": [
+        1,
+        2
+      ],
+      "time_s": 92.3148598701695
+    }
+  },
+  "shape": {
+    "passed": true,
+    "target_volume_mm3": 116840.44536179974,
+    "deposited_volume_mm3": 118389.64614042323,
+    "intersection_volume_mm3": 115405.31755391984,
+    "underfill_volume_mm3": 1435.1279481200029,
+    "overfill_volume_mm3": 2984.3284900900044,
+    "coverage": 0.9877172001233308,
+    "underfill_ratio": 0.012282801076939485,
+    "overfill_ratio": 0.02554191299809708,
+    "iou": 0.9631173400227736,
+    "failed_layer_count": 0,
+    "evaluated_layer_count": 6,
+    "failed_layer_ratio": 0.0,
+    "target_mesh_volume_mm3": 116840.42720688188,
+    "target_volume_discrepancy_ratio": 1.553821591239584e-07
+  },
+  "failure_reasons": [],
+  "issues": [],
+  "output_directory": "C:\\Users\\yenni\\Downloads\\AI-Algorithm-team-3\\validator\\waam_sb3_baseline\\outputs\\validator_result_centerline_v10"
+}
