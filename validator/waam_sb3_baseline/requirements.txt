@@ -1,5 +1,0 @@
-numpy>=1.26
-gymnasium>=0.29
-stable-baselines3>=2.3
-torch>=2.1
-tensorboard>=2.15
