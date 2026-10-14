@@ -1,0 +1,133 @@
+{
+  "schema_version": "4.0",
+  "validator_version": "1.0.1",
+  "status": "PASS",
+  "input": {
+    "directory": "C:\\Users\\yenni\\Downloads\\v17_validation_20261010\\03",
+    "trajectory_rows": 7651,
+    "target_watertight": true
+  },
+  "schedule": {
+    "makespan_s": 1259.22722506,
+    "robot_completion_s": {
+      "1": 1259.22722506,
+      "2": 1259.22722506,
+      "3": 1259.22722506
+    },
+    "workload_imbalance_s": 0.0,
+    "normalized_imbalance": 0.0
+  },
+  "reach": {
+    "distance_basis": "XY",
+    "passed": true,
+    "robots": [
+      {
+        "robot_id": 1,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1488.5154585084322,
+        "minimum_xy_margin_mm": 11.484541491567825,
+        "xy_utilization_ratio": 0.9923436390056215,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      },
+      {
+        "robot_id": 2,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1491.0314610186333,
+        "minimum_xy_margin_mm": 8.968538981366692,
+        "xy_utilization_ratio": 0.9940209740124222,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      },
+      {
+        "robot_id": 3,
+        "passed": true,
+        "xy_reach_radius_mm": 1500.0,
+        "maximum_xy_distance_mm": 1479.7399685597295,
+        "minimum_xy_margin_mm": 20.260031440270495,
+        "xy_utilization_ratio": 0.986493312373153,
+        "xy_violation_point_count": 0,
+        "first_xy_violation_s": null,
+        "last_xy_violation_s": null
+      }
+    ]
+  },
+  "collision": {
+    "passed": true,
+    "collision_event_count": 0,
+    "arm_envelope": {
+      "enabled": true,
+      "passed": true,
+      "event_count": 0,
+      "minimum_safety_margin_mm": 0.2690856628387621,
+      "centerline_distance_at_worst_mm": 250.26908566283876,
+      "required_distance_at_worst_mm": 250.0,
+      "capsule_surface_clearance_at_worst_mm": 50.26908566283876,
+      "pair": [
+        1,
+        3
+      ],
+      "time_s": 376.08265572,
+      "closest_points_xy_mm": [
+        [
+          -197.45031024470472,
+          147.40972977022167
+        ],
+        [
+          -167.0,
+          -101.0
+        ]
+      ],
+      "tcp_positions_xy_mm": [
+        [
+          -11.83769416809082,
+          170.1623077392578
+        ],
+        [
+          500.0,
+          866.025390625
+        ],
+        [
+          -167.0,
+          -101.0
+        ]
+      ]
+    },
+    "tcp_radius": {
+      "enabled": true,
+      "passed": true,
+      "event_count": 0,
+      "minimum_distance_mm": 250.89284949880286,
+      "required_distance_at_minimum_mm": 200.0,
+      "pair": [
+        2,
+        3
+      ],
+      "time_s": 267.60095939
+    }
+  },
+  "shape": {
+    "passed": true,
+    "target_volume_mm3": 197274.9745415401,
+    "deposited_volume_mm3": 199073.4533398899,
+    "intersection_volume_mm3": 191627.14491411063,
+    "underfill_volume_mm3": 5647.807615930015,
+    "overfill_volume_mm3": 7446.299042730016,
+    "coverage": 0.9713707750283338,
+    "underfill_ratio": 0.028629113393907744,
+    "overfill_ratio": 0.03774578635751922,
+    "iou": 0.9360391950293754,
+    "failed_layer_count": 0,
+    "evaluated_layer_count": 6,
+    "failed_layer_ratio": 0.0,
+    "target_mesh_volume_mm3": 197274.95446393624,
+    "target_volume_discrepancy_ratio": 1.0177472312031646e-07
+  },
+  "failure_reasons": [],
+  "issues": [],
+  "output_directory": "C:\\Users\\yenni\\Downloads\\v17_validation_20261010\\03\\output\\2026-10-10_211734"
+}
