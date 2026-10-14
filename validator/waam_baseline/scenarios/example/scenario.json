@@ -1,0 +1,25 @@
+{
+  "normalization_radius_mm": 1800.0,
+  "time_normalization_s": 1000.0,
+  "process": {
+    "travel_speed_mm_s": 200.0,
+    "deposition_speed_mm_s": 10.0
+  },
+  "reward": {
+    "invalid": -10.0,
+    "finish_bonus": 10.0
+  },
+  "robots": [
+    {"robot_id": 1, "base_xyz_mm": [-1000,-600,100], "home_xyz_mm": [-1000,-600,100]},
+    {"robot_id": 2, "base_xyz_mm": [1000,-600,100], "home_xyz_mm": [1000,-600,100]},
+    {"robot_id": 3, "base_xyz_mm": [0,1200,100], "home_xyz_mm": [0,1200,100]}
+  ],
+  "tasks": [
+    {"task_id": 0, "layer": 0, "start_xyz_mm": [-120,0,2], "end_xyz_mm": [-40,0,2]},
+    {"task_id": 1, "layer": 0, "start_xyz_mm": [-30,0,2], "end_xyz_mm": [50,0,2]},
+    {"task_id": 2, "layer": 0, "start_xyz_mm": [60,0,2], "end_xyz_mm": [140,0,2]},
+    {"task_id": 3, "layer": 0, "start_xyz_mm": [-120,25,2], "end_xyz_mm": [-40,25,2]},
+    {"task_id": 4, "layer": 0, "start_xyz_mm": [-30,25,2], "end_xyz_mm": [50,25,2]},
+    {"task_id": 5, "layer": 0, "start_xyz_mm": [60,25,2], "end_xyz_mm": [140,25,2]}
+  ]
+}
