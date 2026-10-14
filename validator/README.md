@@ -1,548 +1,87 @@
-# WAAM SB3 PPO Baseline
-
-This is a deliberately simple first baseline for the 3-robot WAAM project.
-PPO selects `[robot, deposition_task]`; the environment deterministically computes
-travel time and deposition time and minimizes makespan.
-
-## Install
-```bash
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Train
-```bash
-python train.py --scenario scenarios/example/scenario.json --timesteps 100000
-```
-
-## Evaluate
-```bash
-python evaluate.py --scenario scenarios/example/scenario.json --model checkpoints/ppo_waam_baseline
-```
-
-## Baseline design
-- Observation: robot TCP/current time + all task endpoints/done flags + progress/makespan.
-- Action: `MultiDiscrete([3, N])` = `(robot_index, task_index)`.
-- Robot clocks are independent, so assignments represent parallel execution.
-- Reward: negative increase in makespan, invalid repeated-task penalty, completion bonus.
-- This baseline intentionally does NOT yet model continuous robot-robot collision,
-  reach/workspace constraints, waits, safe parking, STL slicing, or Validator export.
-  Those belong in the next environment version after the PPO scheduling baseline works.
-# Multi-Robot WAAM Scheduling with PPO
-
-본 프로젝트는 다중 로봇 WAAM(Wire Arc Additive Manufacturing) 환경에서
-**PPO(Proximal Policy Optimization)**와 **Adaptive Bundle Scheduling**을 결합하여
-안전한 다중 로봇 적층 스케줄을 생성하는 것을 목표로 합니다.
-
-최종 구조는 PPO가 로봇/작업 선택에 대한 선호도를 생성하고,
-V15 Scheduler가 실제 Reach, Collision, 작업 시작 시간 등을 검사하여
-최종 `trajectory.csv`를 생성하는 Hybrid 방식입니다.
-
----
-
-# 1. PPO Algorithm
-
-## 1.1 PPO의 역할
-
-강화학습 알고리즘으로 Stable-Baselines3의 **PPO**를 사용합니다.
-
-PPO가 최종 로봇 trajectory를 직접 생성하는 것이 아니라,
-학습된 정책으로 task assignment를 생성하고 이를 V15 Scheduler의
-robot preference로 사용합니다.
-
-```text
-STL
- ↓
-Task Generator
- ↓
-PPO
- ↓
-Robot / Task Preference
- ↓
-V15 Adaptive Bundle Scheduler
- ↓
-Reachability Check
- ↓
-Collision Check
- ↓
-Earliest Safe Scheduling
- ↓
-trajectory.csv
-```
-
-즉 최종 구조는 다음과 같습니다.
-
-```text
-PPO Preference
-      +
-Geometry-Aware Bundling
-      +
-Earliest Safe Finish
-      +
-Hard Safety Constraints
-```
-
----
-
-## 1.2 PPO Observation
-
-PPO 환경에서는 로봇의 현재 위치와 작업시간,
-각 task의 시작/종료 위치와 완료 여부,
-전체 진행률 및 현재 makespan을 상태로 사용합니다.
-
-핵심 코드는 다음과 같습니다.
-
-```python
-def _get_obs(self):
-    obs = []
-
-    # Robot state
-    for i in range(3):
-        obs.extend((self.robot_pos[i] / self.xyz_scale).tolist())
-        obs.append(float(self.robot_time[i] / self.time_scale))
-
-    # Task state
-    for i in range(self.n_tasks):
-        obs.extend((self.task_start[i] / self.xyz_scale).tolist())
-        obs.extend((self.task_end[i] / self.xyz_scale).tolist())
-        obs.append(float(self.task_done[i]))
-
-    # Global state
-    obs.append(float(self.task_done.mean()))
-    obs.append(self._makespan() / self.time_scale)
-
-    return np.asarray(obs, dtype=np.float32)
-```
-
-따라서 PPO는 단순히 로봇의 작업량만 보는 것이 아니라
-현재 로봇 위치와 task 위치, 완료 상태 및 makespan을 함께 고려합니다.
-
----
-
-# 2. Reward Function
-
-PPO 학습의 핵심 목적은 **Makespan 증가를 최소화하는 것**입니다.
-
-현재 Makespan은 다음과 같이 정의됩니다.
-
-```python
-def _makespan(self):
-    return float(np.max(self.robot_time))
-```
-
-수식으로 표현하면
-
-$$
-M_t = \max(T_1,T_2,T_3)
-$$
-
-입니다.
-
-각 action 수행 전후의 Makespan 차이를 이용하여 reward를 계산합니다.
-
-```python
-before = self._makespan()
-
-travel_time = travel_dist / self.travel_speed
-deposit_time = deposit_dist / self.deposition_speed
-
-self.robot_time[robot_idx] += travel_time + deposit_time
-
-after = self._makespan()
-
-reward = -(after - before)
-```
-
-따라서 기본 Reward는
-
-$$
-r_t = -(M_{t+1}-M_t)
-$$
-
-입니다.
-
-즉 현재 action으로 Makespan이 크게 증가할수록 더 큰 음의 보상을 받습니다.
-
-### Completion Reward
-
-모든 task가 완료되면 추가적인 완료 보상을 부여합니다.
-
-```python
-terminated = bool(np.all(self.task_done > 0.5))
-
-if terminated:
-    reward += self.finish_bonus
-```
-
-따라서 전체 reward 구조는 간단히
-
-$$
-r_t =
--\Delta M_t
-+
-R_{\text{finish}}
-$$
-
-로 표현할 수 있습니다.
-
-이미 완료된 task를 다시 선택한 경우에는 `invalid_penalty`를 적용합니다.
-
-```python
-if self.task_done[task_idx] > 0.5:
-    return (
-        self._get_obs(),
-        self.invalid_penalty,
-        False,
-        truncated,
-        {"invalid_action": True}
-    )
-```
-
----
-
-# 3. V15 Adaptive Bundle Scheduler
-
-PPO의 결과를 그대로 trajectory로 사용하는 것이 아니라,
-V15 Scheduler에서 실제 실행 가능한 경로로 변환합니다.
-
-V15의 핵심 목표는
-
-> **Collision과 Reach 조건을 만족하면서 최종 Makespan을 최소화하는 것**
-
-입니다.
-
----
-
-## 3.1 기존 방식의 문제
-
-각 deposition chain마다 HOME으로 복귀하면 Travel 시간이 크게 증가합니다.
-
-```text
-HOME → Chain A → HOME
-HOME → Chain B → HOME
-HOME → Chain C → HOME
-```
-
-V15에서는 같은 layer의 인접 chain들을 하나의 Bundle로 구성합니다.
-
-```text
-HOME
- ↓
-Chain A
- ↓
-Direct Travel
- ↓
-Chain B
- ↓
-Direct Travel
- ↓
-Chain C
- ↓
-HOME
-```
-
-실제 V15에서는 두 chain 사이의 직접 이동이
-HOME을 경유하는 것보다 짧은지 검사합니다.
-
-```python
-direct = np.linalg.norm(sb - ea)
-
-via_home = (
-    np.linalg.norm(ea - home)
-    + np.linalg.norm(sb - home)
-)
-
-if direct < via_home:
-    return True
-```
-
-이를 통해 불필요한 HOME 왕복 이동을 줄였습니다.
-
----
-
-## 3.2 Earliest Safe Finish
-
-각 Bundle에 대해 모든 실행 가능한 로봇을 검사합니다.
-
-로봇이 현재 사용 가능한 시간부터 작업을 시작해 보고,
-충돌이 발생하면 다음 안전한 시작시간을 탐색합니다.
-
-```python
-start = available[rid]
-
-for _ in range(max_retries):
-
-    candidate = shifted(local, start)
-
-    conflict, next_start = candidate_conflict(
-        robot,
-        candidate,
-        robots,
-        tracks,
-        config
-    )
-
-    if not conflict:
-        found = True
-        break
-
-    refined = refine_earliest_collision_free_start(
-        robot,
-        local,
-        robots,
-        tracks,
-        config,
-        start,
-        next_start,
-        coarse_step=1.0,
-        refine_iters=14,
-    )
-
-    start = refined if refined is not None else next_start
-```
-
-즉 단순히 "충돌하므로 실행 불가"로 끝내지 않고,
-
-```text
-현재 시작시간
-     ↓
-Collision?
-     ↓ YES
-다음 가능한 시간 탐색
-     ↓
-Boundary refinement
-     ↓
-Earliest Collision-Free Start
-```
-
-방식으로 가능한 가장 빠른 시작시간을 찾습니다.
-
----
-
-## 3.3 Makespan 최소화를 위한 Robot 선택
-
-안전하게 수행 가능한 후보는 다음과 같이 저장합니다.
-
-```python
-feasible.append((
-    start + duration,   # finish time
-    rid != pref,        # PPO preference
-    start,
-    rid,
-    candidate,
-    deposition_duration(candidate),
-))
-```
-
-그리고 최종 선택은
-
-```python
-return min(
-    feasible,
-    key=lambda x: (x[0], x[1])
-)
-```
-
-으로 이루어집니다.
-
-즉 선택 우선순위는
-
-```text
-1순위 : 가장 빠른 Finish Time
-2순위 : PPO Preferred Robot
-```
-
-입니다.
-
-수식으로 표현하면
-
-$$
-r^*
-=
-\arg\min_{r\in R_{\mathrm{feasible}}}
-F_r
-$$
-
-이며
-
-$$
-F_r = S_r + D_r
-$$
-
-입니다.
-
-따라서 로봇별 작업량을 억지로 동일하게 만드는 것이 아니라,
-**현재 조건에서 Bundle을 가장 빨리 끝낼 수 있는 안전한 로봇을 선택합니다.**
-
----
-
-## 3.4 큰 작업부터 Scheduling
-
-Bundle은 deposition 시간이 긴 순서대로 먼저 처리합니다.
-
-```python
-bundles = sorted(
-    bundles,
-    key=lambda b: bundle_dep_time(b, tasks, config),
-    reverse=True
-)
-```
-
-이는 긴 작업이 마지막에 남아 전체 Makespan을 증가시키는 현상을
-줄이기 위한 scheduling 방식입니다.
-
----
-
-## 3.5 Adaptive Bundle Split
-
-Bundle 전체를 안전하게 실행할 수 없다면
-해당 Bundle을 더 작은 단위로 분할합니다.
-
-```python
-choice = find_bundle_candidate(...)
-
-if choice is None:
-
-    pieces = split_bundle(bundle)
-
-    left, right = pieces
-
-    pending.insert(0, (right, depth + 1))
-    pending.insert(0, (left, depth + 1))
-```
-
-또한 특정 로봇만 사용되는 경우에는
-각 chain을 수행할 수 있는 로봇 집합이 변하는 위치를 기준으로
-Bundle을 Adaptive하게 분할합니다.
-
-```python
-if sig != current_sig:
-    out.append(current)
-    current = [chain]
-    current_sig = sig
-```
-
-따라서 Test 번호별로 별도의 규칙을 넣지 않고,
-실제 geometry와 robot reachability를 기준으로 작업을 분할합니다.
-
----
-
-# 4. V15 Makespan Minimization Strategy
-
-최종적으로 V15에서는 다음 5가지 방법을 조합하여 Makespan을 감소시킵니다.
-
-| Strategy | Purpose |
-|---|---|
-| Direct Travel Bundle | HOME 왕복 Travel 감소 |
-| Longest Bundle First | 긴 작업이 마지막에 남는 현상 감소 |
-| Earliest Safe Start | 불필요한 Wait 감소 |
-| Earliest Finish Robot | 가장 빠르게 완료 가능한 Robot 선택 |
-| Adaptive Bundle Split | 여러 Robot의 병렬 작업 증가 |
-
-전체적인 흐름은 다음과 같습니다.
-
-```text
-Deposition Chains
-       ↓
-Same-Layer Bundling
-       ↓
-Direct Travel 적용
-       ↓
-Long Bundle 우선 Scheduling
-       ↓
-각 Robot의 Earliest Safe Start 계산
-       ↓
-Earliest Finish Robot 선택
-       ↓
-실패 시 Bundle Split
-       ↓
-Parallel Scheduling
-       ↓
-Final Collision Audit
-       ↓
-trajectory.csv
-```
-
----
-
-# 5. Results
-
-최종 **V5 Task Generator + V15 Adaptive Bundle Scheduler**를
-동일하게 Test 01~06에 적용했습니다.
-
-| Test | Makespan | Shape IoU | Collision | Validator |
-|---|---:|---:|---:|---|
-| 01 | - | - | 0 | **PASS** |
-| 02 | 1,865.00 s | 94.32% | 0 | **PASS** |
-| 03 | 1,263.15 s | 93.60% | 0 | **PASS** |
-| 04 | 37,918.78 s | 94.09% | 0 | **PASS** |
-| 05 | 100,522.34 s | 90.38% | 0 | **PASS** |
-| 06 | 5,209.81 s | 95.25% | 0 | **PASS** |
-
-**Test 01~06 모두 공식 WAAM Validator를 통과했습니다.**
-
----
-
-## Test 04 Makespan Improvement
-
-Test 04에서 기존 V12 Scheduler의 Makespan은
-
-$$
-49,758.38s
-$$
-
-였으며 V15에서는
-
-$$
-37,918.78s
-$$
-
-로 감소했습니다.
-
-따라서
-
-$$
-\frac{49758.38-37918.78}{49758.38}\times100
-=
-23.79\%
-$$
-
-즉 **약 23.79%의 Makespan 감소**를 달성했습니다.
-
----
-
-## Test 05 Large-Scale Result
-
-Test 05에서도 공식 Validator를 통과했습니다.
-
-| Metric | Result |
-|---|---:|
-| Makespan | 100,522.34 s |
-| Coverage | 91.55% |
-| IoU | 90.38% |
-| Failed Layers | 0 / 350 |
-| ARM Collision | 0 |
-| TCP Collision | 0 |
-| Reach Violation | 0 |
-| Validator | **PASS** |
-
----
-
-# 6. Conclusion
-
-본 프로젝트에서는 PPO가 학습 기반의 Robot/Task Preference를 제공하고,
-V15 Adaptive Bundle Scheduler가 실제 물리적 제약을 고려하여
-최종 trajectory를 생성하도록 구성했습니다.
-
-특히 V15에서는
-
-**Geometry-Aware Bundling + Direct Travel + Earliest Safe Start +
-Earliest Finish Robot Selection + Adaptive Split**
-
-을 적용하여 불필요한 Travel과 Wait를 감소시키고
-Multi-Robot Parallelism을 증가시켰습니다.
-
-그 결과 서로 다른 크기와 형상을 가진 Test 01~06에서
-동일한 알고리즘으로 공식 Validator PASS를 달성했습니다.
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+import xml.etree.ElementTree as ET
+
+source = Path(r'C:\Users\yenni\OneDrive\문서\[INE4107]중간보고서(양식).docx')
+out = Path(r'C:\Users\yenni\Downloads\WAAM_GitHub_README')
+assets = out / 'assets'
+assets.mkdir(parents=True, exist_ok=True)
+ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+with ZipFile(source) as doc:
+    root = ET.fromstring(doc.read('word/document.xml'))
+    paragraphs = [''.join(t.text or '' for t in p.findall('.//w:t', ns)) for p in root.findall('.//w:p', ns)]
+    for i in range(1, 13):
+        name = f'gantt_{i:02d}.png' if i <= 6 else f'validation_{i-6:02d}.png'
+        (assets / name).write_bytes(doc.read(f'word/media/image{i}.png'))
+
+start = paragraphs.index('Algorithm: Task Generator + PPO-Clip + Scheduler v17')
+end = next(i for i in range(start, len(paragraphs)) if paragraphs[i].startswith('30 최종 충돌 검사'))
+pseudocode = '\n'.join(paragraphs[start:end+1])
+text = '''# PPO 기반 다중 로봇 WAAM 경로 생성 및 안전 스케줄링
+
+Task Generator로 STL 형상을 적층 작업으로 변환하고, PPO로 로봇 배정 선호도를 생성한 뒤 Scheduler v17로 안전한 작업 일정을 구성합니다.
+
+## 모델별 적용 결과
+
+시간 형식은 `DD:HH:MM:SS`(일:시:분:초)입니다. Makespan은 초 단위로 반올림했습니다.
+
+| 모델 | Makespan (초) | Makespan (DD:HH:MM:SS) | 계산 시간 (DD:HH:MM:SS) | Validator 결과 |
+| --- | ---: | --- | --- | --- |
+| 01 · Honeycomb | 683.98 | 00:00:11:24 | 00:00:46:00 | PASS |
+| 02 · Spiral | 1,865.00 | 00:00:31:05 | 00:02:38:00 | PASS |
+| 03 · Triangular truss | 1,259.23 | 00:00:20:59 | 00:01:08:00 | PASS |
+| 04 · Motor inner | 37,094.55 | 00:10:18:15 | 00:05:31:00 | PASS |
+| 05 · Twisted shell | 100,522.34 | 01:03:55:22 | 00:17:41:00 | PASS |
+| 06 · Angle frame | 5,189.37 | 00:01:26:29 | 00:02:35:00 | PASS |
+
+Makespan은 로봇 일정의 예정 작업 시간입니다. 계산 시간은 trajectory 생성에 걸린 대략적인 경과 시간으로, 공식 Validator 실행 시간은 제외합니다.
+
+## Validator 적용 결과
+
+### 간트차트
+
+Test 1부터 Test 6까지의 결과입니다.
+
+'''
+for i in range(1, 7):
+    text += f'#### Test {i:02d}\n\n![Test {i:02d} 간트차트](assets/gantt_{i:02d}.png)\n\n'
+text += '### 검증 결과 화면\n\n'
+for i in range(1, 7):
+    text += f'#### Test {i:02d}\n\n![Test {i:02d} 검증 결과](assets/validation_{i:02d}.png)\n\n'
+text += '## 알고리즘 수도코드\n\n```text\n' + pseudocode + '\n```\n\n'
+text += r'''$A_\ell$: 목표 단면, $D$: 비드 영역, $w$: 비드 폭, $L$: 경로 길이, $|P|$: 선분 수입니다.
+
+PPO의 action은 로봇 ID가 아닌 **예상 완료 시각 순위**이며, Scheduler에 로봇 선호도로 전달됩니다. 이번 검증은 저장된 PPO 모델을 이용한 추론으로 수행했으며, 수도코드의 PPO-Clip 학습 단계는 재학습 시에만 수행합니다.
+
+## 이 문제에 적용한 이유
+
+### Task Generator
+
+STL에는 물체 표면의 형상 정보가 있지만 로봇이 따라갈 적층 선분은 포함되어 있지 않습니다. 따라서 층별 단면을 추출하고 비드 폭을 고려하여 실제 적층 경로를 생성해야 합니다.
+
+Task Generator는 단면마다 형상과 비용을 평가하여 경로를 선택합니다. 3차원 형상을 한 번에 비교하는 대신 각 층에서 경로 후보를 평가할 수 있다는 점을 활용했습니다.
+
+### PPO
+
+같은 선분이라도 로봇의 현재 위치와 누적 작업 시간에 따라 적합한 로봇이 달라집니다. 당장 유리한 배정이 이후 작업에서도 유리하다고 보장할 수는 없습니다.
+
+현재 상태와 이후 누적 보상을 고려하는 PPO를 활용하여 상태에 따른 로봇 배정 선호도를 제공하고자 했습니다.
+
+## 알고리즘의 특징과 장단점
+
+| 구성 요소 | 특징 | 장점 | 한계 |
+| --- | --- | --- | --- |
+| Task Generator | 층별 단면에서 후보를 생성하고, 형상 제약을 만족하는 경로 중 비용이 작은 경로 선택 | Coverage·Overfill·IoU를 고려하면서 경로 길이와 선분 분절을 줄일 수 있음 | 후보를 반복 평가하므로 계산량이 큼 |
+| PPO | 로봇 위치·누적 작업 상태를 바탕으로 예상 완료 시각 순위 중 하나를 선택 | 고정 규칙 대신 상태에 따른 배정 선호도를 학습할 수 있음 | 학습 조건과 다른 형상에서도 성능이 유지되는지 확인 필요 |
+| Scheduler v17 · Bundle | 도달 범위에 맞게 chain을 분할하고 bundle 처리 순서를 탐색 | 선분별 배정 부담을 줄이고, 연속 작업을 통해 HOME 왕복과 이동을 줄일 수 있음 | 제한된 순서 탐색이므로 전역 최적해를 보장하지 않음 |
+'''
+(out / 'README.md').write_text(text, encoding='utf-8')
+assert all(x not in text for x in ['고유영', '2021040673', 'youyoung0602', 'https://'])
+assert len(list(assets.glob('*.png'))) == 12
+with ZipFile(out.with_suffix('.zip'), 'w', ZIP_DEFLATED) as archive:
+    for item in sorted(out.rglob('*')):
+        if item.is_file():
+            archive.write(item, item.relative_to(out))
+print(out / 'README.md')
+print(out.with_suffix('.zip'))
+print('Verified: 12 images, original pseudocode, no personal header or external URLs')
