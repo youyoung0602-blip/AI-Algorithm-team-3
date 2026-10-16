@@ -123,17 +123,74 @@ PPO의 action은 로봇 ID가 아닌 **예상 완료 시각 순위**이며, Sche
 
 ## 이 문제에 적용한 이유
 
-### Task Generator
+### 1. Task Generator
 
 STL에는 물체 표면의 형상 정보가 있지만 로봇이 따라갈 적층 선분은 포함되어 있지 않습니다. 따라서 층별 단면을 추출하고 비드 폭을 고려하여 실제 적층 경로를 생성해야 합니다.
 
-Task Generator는 단면마다 형상과 비용을 평가하여 경로를 선택합니다. 3차원 형상을 한 번에 비교하는 대신 각 층에서 경로 후보를 평가할 수 있다는 점을 활용했습니다.
+Task Generator는 단면마다 형상과 비용을 평가하여 경로를 선택합니다. 3차원 형상을 한 번에 비교하는 대신 각 층에서 경로 후보를 평가할 수 있다는 점을 활용했습니다.Coverage, Overfill, IoU를 평가하고 조건을 만족하는 후보 중 경로 비용이 낮은 경로를 선택합니다.
 
-### PPO
+- **Coverage:** 목표 단면 중 적층 비드가 덮는 비율
+- **Overfill:** 목표 단면 밖으로 초과 적층되는 비율
+- **IoU:** 목표 단면과 비드 영역의 교집합/합집합 비율
+- **선택 기준:** 경로 길이, 선분 수, 목표 IoU 미달 패널티
+
+### 2. PPO (Proximal Policy Optimization)
 
 같은 선분이라도 로봇의 현재 위치와 누적 작업 시간에 따라 적합한 로봇이 달라집니다. 당장 유리한 배정이 이후 작업에서도 유리하다고 보장할 수는 없습니다.
 
-현재 상태와 이후 누적 보상을 고려하는 PPO를 활용하여 상태에 따른 로봇 배정 선호도를 제공하고자 했습니다.
+현재 상태와 이후 누적 보상을 고려하는 PPO를 활용하여 상태에 따른 로봇 배정 선호도를 제공하고자 했습니다. 선택한 순위는 Scheduler에 로봇 선호도(`pref`)로 전달됩니다.
+
+- **Training:** rollout 수집, GAE 기반 Advantage 계산, PPO-Clip 목적함수 최적화
+- **Inference:** 현재 상태에 따라 정책 행동 선택 및 로봇 선호도 생성
+- **적용 이유:** 단순 고정 규칙 대신 상태에 따라 달라지는 작업 배정 선호도를 학습하기 위함
+
+| 설정 항목 | 값 | 설명 |
+| --- | --- | --- |
+| Learning rate | 0.0003 | 학습률 |
+| Rollout steps (`n_steps`) | 4,096 | 업데이트 전 환경당 수집 step 수 |
+| Batch size | 64 | 미니배치 크기 |
+| Epochs (`n_epochs`) | 10 | 수집 데이터의 반복 학습 횟수 |
+| Discount factor (`gamma`) | 0.99 | 미래 보상의 할인율 |
+| GAE lambda | 0.95 | Advantage 추정 계수 |
+| Clip range (`epsilon`) | 0.2 | PPO 확률비 clipping 폭 |
+| Entropy coefficient | 0.01 | 엔트로피 항의 가중치 |
+| Value coefficient | 0.5 | 가치함수 손실 가중치 |
+| Max gradient norm | 0.5 | Gradient clipping 기준 |
+| Advantage normalization | True | Advantage 정규화 |
+| Value function clipping | None | 미사용 |
+| Random seed | 42 | 저장된 모델의 난수 시드 |
+| 학습 환경 수 | 1 | 병렬 환경 수 |
+| 목표 학습 step | 20,000 | 설정된 목표 학습량 |
+| 기록된 누적 step | 20,480 | 체크포인트에 기록된 학습량 |
+| 상태 벡터 차원 | 25 | Observation dimension |
+| 행동 공간 | Discrete(3) | 예상 완료 시각 순위 0·1·2 |
+| 추론 방식 | deterministic=True | 최대 확률 action 선택 |
+
+### 3. Scheduler v17
+
+작업을 로봇별로 안전하게 배정하고 순서 및 시점을 조정해 Makespan을 줄입니다.
+
+| 역할 | 설명 |
+|---|---|
+| Task Assignment | 로봇의 도달 범위와 선호도를 고려한 작업 배정 |
+| Task Sequencing | Chain/Bundle 처리 순서 탐색 |
+| Scheduling | 로봇별 시작·종료 시각과 대기시간 조정 |
+| Collision Avoidance | 충돌 발생 시 작업 지연 또는 Bundle 분할 |
+| Makespan Optimization | 충돌 검사에 통과하면서 기존 일정보다 짧은 일정 채택 |
+
+보고서의 Scheduler v17은 충돌 검사를 통과한 **V15 기본 일정**을 초기 해로 삼고, Bundle 변형 및 작업 순서 후보를 탐색합니다. 후보 일정이 안전하며 Makespan이 더 짧을 때만 최적 일정을 갱신합니다.
+
+#### Bundle의 역할
+
+**Bundle**은 같은 Layer에 있는 인접 Chain을 묶어 연속 작업하도록 구성하는 단위입니다.
+
+1. Chain 위치와 거리 분석
+2. 동일 층의 인접 Chain을 Bundle로 구성
+3. Chain 사이 직접 Travel 경로 생성
+4. 충돌 및 작업 가능 여부 확인
+5. 배치 불가능하거나 충돌 시 Bundle을 더 작은 단위로 분할
+
+Bundle은 불필요한 HOME 왕복과 비가공 이동시간을 줄이는 데 기여할 수 있습니다. 단, 실제 개선 폭은 동일 조건의 Bundle 적용 전후 비교로 확인해야 합니다.
 
 ## 알고리즘의 특징과 장단점
 
