@@ -222,7 +222,14 @@ scheduler가 추가하는 충돌 회피 대기 시간은 직접 반영하지 않
 
 #### Bundle의 역할
 
-**Bundle**은 같은 Layer에 있는 인접 Chain을 묶어 연속 작업하도록 구성하는 단위입니다.
+**Bundle**은 같은 Layer에 있는 인접 Chain을 묶어 연속 작업하도록 구성하는 단위입니다. 즉 **같은 층의 여러 chain을 하나의 작업 단위로 묶은 것**으로 볼 수 있습니다.
+
+- **Task:** 하나의 적층 선분
+- **Chain:** 연결된 적층 선분들의 연속 경로
+- **Bundle:** 같은 층의 가까운 chain들을 묶은 배정 단위
+
+```text
+적층 선분(Task) → 연속 경로(Chain) → 작업 묶음(Bundle)
 
 1. Chain 위치와 거리 분석
 2. 동일 층의 인접 Chain을 Bundle로 구성
