@@ -229,7 +229,7 @@ scheduler가 추가하는 충돌 회피 대기 시간은 직접 반영하지 않
 - **Bundle:** 같은 층의 가까운 chain들을 묶은 배정 단위
 ```text
 적층 선분(Task) → 연속 경로(Chain) → 작업 묶음(Bundle)
-
+```
 1. Chain 위치와 거리 분석
 2. 동일 층의 인접 Chain을 Bundle로 구성
 3. Chain 사이 직접 Travel 경로 생성
