@@ -237,3 +237,147 @@ Bundle은 불필요한 HOME 왕복과 비가공 이동시간을 줄이는 데 �
 | Task Generator | 층별 단면에서 후보를 생성하고, 형상 제약을 만족하는 경로 중 비용이 작은 경로 선택 | Coverage·Overfill·IoU를 고려하면서 경로 길이와 선분 분절을 줄일 수 있음 | 후보를 반복 평가하므로 계산량이 큼 |
 | PPO | 로봇 위치·누적 작업 상태를 바탕으로 예상 완료 시각 순위 중 하나를 선택 | 고정 규칙 대신 상태에 따른 배정 선호도를 학습할 수 있음 | 학습 조건과 다른 형상에서도 성능이 유지되는지 확인 필요 |
 | Scheduler v17 · Bundle | 도달 범위에 맞게 chain을 분할하고 bundle 처리 순서를 탐색 | 선분별 배정 부담을 줄이고, 연속 작업을 통해 HOME 왕복과 이동을 줄일 수 있음 | 제한된 순서 탐색이므로 전역 최적해를 보장하지 않음 |
+
+# Validator 실행 방법
+
+`v17_validate.py`는 적층 경로 생성부터 공식 Validator 검증까지 자동으로 실행하는 스크립트입니다.
+
+## 1. 전체 실행 흐름
+
+```text
+v17_validate.py
+    │
+    ├─ 선택 모델의 target.stl · config.yaml 복사
+    │
+    ├─ safe_scheduler_v17_reach_split.py 실행
+    │   ├─ Task Generator → 적층 task 생성
+    │   ├─ PPO 추론 → 로봇 선호도 생성
+    │   ├─ Scheduler v17 → 안전한 일정 생성·탐색
+    │   ├─ 내부 충돌 검사
+    │   └─ trajectory.csv 저장
+    │
+    ├─ 공식 Validator 실행
+    └─ 검증 결과 및 로그 저장
+```
+
+## 2. 단계별 처리 내용
+
+| 단계 | 주요 함수·코드 | 처리 내용 |
+| --- | --- | --- |
+| 입력 준비 | `v17_validate.py` | 모델 선택, 결과 폴더 생성, STL·설정 파일 복사 |
+| Task 생성 | `build_scenario()` | 층별 Hatch·Skeleton 후보를 평가하여 적층 선분 생성 |
+| PPO 추론 | `PPO.load()` · `model.predict()` · `env.step()` | 저장된 모델로 task별 로봇 선호도 생성 |
+| 스케줄링 | `schedule_v17()` | v15 기본 일정 확보, 도달 범위 분할, bundle 구성·순서 탐색 |
+| 내부 검사 | `audit()` | 최종 일정의 내부 충돌 검사 |
+| CSV 저장 | `write_validator_csv()` | 적층(D)·이동(T)·대기(W) 일정 저장 |
+| 공식 검증 | `waam_validator.cli run` | 도달 범위·충돌·형상을 검사하고 결과 산출 |
+
+- PPO는 저장된 모델을 사용하며 실행 중 추가 학습하지 않습니다.
+- v17은 더 빠르고 내부 충돌 검사를 통과한 후보만 채택합니다.
+- 개선된 후보가 없으면 v15 기본 일정을 유지합니다.
+
+## 3. 경로 생성부터 검증까지 실행
+
+현재 PC의 Downloads에 준비된 파일 기준입니다.
+PowerShell에서 아래 명령을 실행합니다.
+
+### 실행 경로 설정
+
+```powershell
+$python = 'C:\Users\yenni\Downloads\.venv\Scripts\python.exe'
+$script = 'C:\Users\yenni\Downloads\v17_validate.py'
+$result = 'C:\Users\yenni\Downloads\v17_run_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
+```
+
+### 모델 선택 및 실행
+
+아래 명령 중 원하는 하나를 선택합니다.
+
+```powershell
+# 01번 실행
+& $python -B $script $result '01'
+
+# 01·02·03·06번 순차 실행
+& $python -B $script $result '01,02,03,06'
+
+# 전체 모델 순차 실행
+& $python -B $script $result '01,02,03,04,05,06'
+```
+
+`v17_validate.py` 상단의 `repo`는 프로젝트 위치를 가리킵니다.
+프로젝트를 다른 위치로 옮겼다면 해당 경로를 수정해야 합니다.
+
+```python
+repo = Path(r'C:\Users\yenni\OneDrive\바탕 화면\AI-Algorithm-team-3')
+```
+
+## 4. 기존 trajectory만 검증
+
+이미 생성된 `trajectory.csv`가 있다면 경로 생성 없이 공식 Validator만 실행할 수 있습니다.
+
+### 필요한 파일
+
+```text
+검증할_폴더/
+├── target.stl
+├── config.yaml
+└── trajectory.csv
+```
+
+### 실행 명령
+
+```powershell
+$python = 'C:\Users\yenni\Downloads\.venv\Scripts\python.exe'
+$repo = 'C:\Users\yenni\OneDrive\바탕 화면\AI-Algorithm-team-3'
+
+$env:PYTHONPATH = "$repo\validator\src"
+$env:PYTHONIOENCODING = 'utf-8'
+
+# 검증할 모델 폴더 지정
+$case = 'C:\Users\yenni\Downloads\v17_validation_20261010\01'
+
+# 공식 Validator 실행
+& $python -B -m waam_validator.cli run $case
+```
+
+`$case`를 검증하려는 폴더 경로로 변경합니다.
+
+## 5. 결과 파일 확인
+
+전체 실행 시 결과는 다음 구조로 저장됩니다.
+
+```text
+v17_run_날짜_시간/
+├── results_01.json
+└── 01/
+    ├── target.stl
+    ├── config.yaml
+    ├── trajectory.csv
+    ├── scheduler.log
+    ├── validator.log
+    └── output/
+        └── 날짜_시간/
+            └── summary.json
+```
+
+| 파일 | 내용 |
+| --- | --- |
+| `trajectory.csv` | 로봇별 적층·이동·대기 일정 |
+| `scheduler.log` | 경로 생성·스케줄 탐색·내부 검사 기록 |
+| `validator.log` | 공식 Validator 실행 기록 |
+| `summary.json` | 공식 검증 판정과 상세 수치 |
+| `results_*.json` | 선택 모델들의 실행·검증 결과 요약 |
+
+## 6. 최종 검증 항목
+
+| 항목 | 의미 |
+| --- | --- |
+| Status | 전체 PASS / FAIL |
+| Makespan | 로봇 일정의 총 작업 시간 |
+| Reach | 로봇별 XY 도달 범위 만족 여부 |
+| Collision | Arm·TCP 충돌 검사 결과 |
+| IoU | 목표 형상과 적층 형상의 일치 정도 |
+
+**최종 성공 여부는 공식 Validator의 `status: PASS`로 확인합니다.**
+
+내부 충돌 검사 통과나 `COMPLETE` 출력만으로는 공식 검증 통과를 의미하지 않습니다.
