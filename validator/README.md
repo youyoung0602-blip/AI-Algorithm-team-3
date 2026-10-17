@@ -349,6 +349,9 @@ scheduler가 추가하는 충돌 회피 대기 시간은 직접 반영하지 않
 - **Task:** 하나의 적층 선분
 - **Chain:** 연결된 적층 선분들의 연속 경로
 - **Bundle:** 같은 층의 가까운 chain들을 묶은 배정 단위
+
+<img width="2305" height="1607" alt="bundle_explained" src="https://github.com/user-attachments/assets/a840cd60-4c3d-41c0-a1d0-b53b1d89072e" />
+
 ```text
 적층 선분(Task) → 연속 경로(Chain) → 작업 묶음(Bundle)
 ```
